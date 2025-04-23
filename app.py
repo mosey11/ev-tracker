@@ -44,8 +44,8 @@ for col in expected_cols:
 df['SheetRow'] = df.index + 2
 
 # === Clean and normalize data ===
-df["Stake ($)"] = df["Stake ($)"].replace('[\$,]', '', regex=True).replace('', '0').astype(float)
-df["Profit/Loss"] = df["Profit/Loss"].replace('[\$,]', '', regex=True).replace('', '0').astype(float)
+df["Stake ($)"] = df["Stake ($)"].replace('[\\$,]', '', regex=True).replace('', '0').astype(float)
+df["Profit/Loss"] = df["Profit/Loss"].replace('[\\$,]', '', regex=True).replace('', '0').astype(float)
 try:
     df['EV'] = df['EV'].astype(float)
 except:
@@ -53,17 +53,13 @@ except:
 df['Result'] = df['Result'].fillna('').replace('', 'Pending')
 df['Sport'] = df['Sport'].fillna('').replace('', 'Unknown')
 
+# === Profit and Expected Profit calculations ===
 def calc_real(r):
-    if r['Result'] == 'Win':
-        return r['Profit/Loss'] - r['Stake ($)']
-    if r['Result'] == 'Loss':
-        return -r['Stake ($)']
-    if r['Result'] == 'Cashed Out':
-        return r['Profit/Loss'] - r['Stake ($)']
+    if r['Result'] == 'Win': return r['Profit/Loss'] - r['Stake ($)']
+    if r['Result'] == 'Loss': return -r['Stake ($)']
+    if r['Result'] == 'Cashed Out': return r['Profit/Loss'] - r['Stake ($)']
     return 0
-
-def calc_expected(r):
-    return r['Stake ($)'] * r['EV']
+def calc_expected(r): return r['Stake ($)'] * r['EV']
 
 df['Real Profit'] = df.apply(calc_real, axis=1)
 df['Expected Profit'] = df.apply(calc_expected, axis=1)
