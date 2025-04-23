@@ -20,8 +20,7 @@ if raw_info is None:
     st.stop()
 # Build a plain dict from secrets to allow mutation
 service_account_info = {k: v for k, v in raw_info.items()}
-# Restore real newlines in private_key if stored as literal '
-'
+# Restore real newlines in private_key if stored as literal ''
 if "private_key" in service_account_info and isinstance(service_account_info["private_key"], str):
     service_account_info["private_key"] = service_account_info["private_key"].replace('\n', '')
 # Create Credentials
