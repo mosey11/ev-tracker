@@ -14,8 +14,11 @@ import plotly.express as px
 from datetime import date
 
 # === Google Sheets Authentication using Streamlit Secrets ===
+service_account_info = st.secrets["gcp_service_account"].copy()
+if "private_key" in service_account_info:
+    service_account_info["private_key"] = service_account_info["private_key"].replace('\\n', '\n')
 creds = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],
+    service_account_info,
     scopes=[
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -30,36 +33,37 @@ if not all_values or len(all_values) < 2:
     st.error("No data found in the sheet.")
     st.stop()
 headers = all_values[0]
-records = [dict(zip(headers, row + [""]*(len(headers)-len(row)))) for row in all_values[1:]]
+records = [dict(zip(headers, row + [""] * (len(headers) - len(row)))) for row in all_values[1:]]
 df = pd.DataFrame(records)
 
 # === Standardize expected columns ===
 expected_cols = ["Date Placed", "Stake ($)", "EV", "Odds", "Profit/Loss", "Result", "Game Name", "Sport"]
 for col in expected_cols:
-    df.setdefault(col, "")
-
+    if col not in df.columns:
+        df[col] = ""
 df['SheetRow'] = df.index + 2
 
 # === Clean and normalize data ===
 df["Stake ($)"] = df["Stake ($)"].replace('[\$,]', '', regex=True).replace('', '0').astype(float)
 df["Profit/Loss"] = df["Profit/Loss"].replace('[\$,]', '', regex=True).replace('', '0').astype(float)
-# EV stored as decimal fraction
 try:
     df['EV'] = df['EV'].astype(float)
 except:
-    df['EV'] = df['EV'].replace('%','', regex=True).replace('', '0').astype(float)
-# Normalize missing
-
+    df['EV'] = df['EV'].replace('%', '', regex=True).replace('', '0').astype(float)
 df['Result'] = df['Result'].fillna('').replace('', 'Pending')
 df['Sport'] = df['Sport'].fillna('').replace('', 'Unknown')
 
-# === Profit and Expected Profit calculations ===
 def calc_real(r):
-    if r['Result'] == 'Win': return r['Profit/Loss'] - r['Stake ($)']
-    if r['Result'] == 'Loss': return -r['Stake ($)']
-    if r['Result'] == 'Cashed Out': return r['Profit/Loss'] - r['Stake ($)']
+    if r['Result'] == 'Win':
+        return r['Profit/Loss'] - r['Stake ($)']
+    if r['Result'] == 'Loss':
+        return -r['Stake ($)']
+    if r['Result'] == 'Cashed Out':
+        return r['Profit/Loss'] - r['Stake ($)']
     return 0
-def calc_expected(r): return r['Stake ($)'] * r['EV']
+
+def calc_expected(r):
+    return r['Stake ($)'] * r['EV']
 
 df['Real Profit'] = df.apply(calc_real, axis=1)
 df['Expected Profit'] = df.apply(calc_expected, axis=1)
@@ -72,9 +76,9 @@ with st.sidebar.form("add_bet_form"):
     new_ev     = st.number_input("EV (decimal)", min_value=0.0, format="%.3f")
     new_odds   = st.text_input("Odds")
     new_profit = st.number_input("Profit/Loss ($)", format="%.2f")
-    new_result = st.selectbox("Result", ["Win","Loss","Cashed Out","Pending"], index=3)
+    new_result = st.selectbox("Result", ["Win", "Loss", "Cashed Out", "Pending"], index=3)
     new_game   = st.text_input("Game Name")
-    new_sport  = st.selectbox("Sport", ["Basketball","Football"], index=0)
+    new_sport  = st.selectbox("Sport", ["Basketball", "Football"], index=0)
     if st.form_submit_button("Add Bet"):
         ws.append_row([
             new_date.strftime("%d-%m-%Y"), new_stake, new_ev, new_odds, new_profit,
@@ -86,7 +90,7 @@ st.sidebar.markdown("---")
 # === Sidebar: Filters & Settings ===
 st.sidebar.header("🔍 Filters & Settings")
 dyn_results = df['Result'].unique().tolist()
-dyn_sports = [s for s in df['Sport'].unique().tolist() if s!='Unknown']
+dyn_sports = [s for s in df['Sport'].unique().tolist() if s != 'Unknown']
 selected_results = st.sidebar.multiselect("Result", dyn_results, default=dyn_results)
 selected_sports = st.sidebar.multiselect("Sport", dyn_sports, default=dyn_sports)
 initial_capital = st.sidebar.number_input("Initial Capital (A$)", min_value=0.0, value=500.0, step=50.0)
@@ -117,8 +121,8 @@ chart_df = df_filtered.groupby('Date Placed')[['Real Profit','Expected Profit']]
 fig = px.line(
     chart_df,
     x='Date Placed',
-    y=['Expected Profit','Real Profit'],
-    labels={'value':'Cumulative Profit (A$)','variable':'Series','Date Placed':'Date'},
+    y=['Expected Profit', 'Real Profit'],
+    labels={'value':'Cumulative Profit (A$)', 'variable':'Series', 'Date Placed':'Date'},
     title='Profit vs Expected Over Time'
 )
 fig.update_layout(
