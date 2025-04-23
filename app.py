@@ -1,26 +1,31 @@
 import streamlit as st
 st.set_page_config(layout="wide")  # Must be first Streamlit command
+
+# === Password Protection ===
+password = st.sidebar.text_input("Enter App Password:", type="password")
+if "APP_PASSWORD" not in st.secrets or password != st.secrets["APP_PASSWORD"]:
+    st.error("🔒 Incorrect password. Access denied.")
+    st.stop()
+
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-import matplotlib.pyplot as plt
 import plotly.express as px
 from matplotlib.dates import DateFormatter
 from datetime import date
 
-# === Google Sheets Authentication ===
-scope = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-creds = Credentials.from_service_account_file(
-    "ev-tracker-457704-9151025d6906.json",
-    scopes=scope
+# === Google Sheets Authentication using Streamlit Secrets ===
+creds = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ],
 )
 client = gspread.authorize(creds)
+ws = client.open("EV Tracker").worksheet("Sheet1")
 
 # === Load all rows from Google Sheet ===
-ws = client.open("EV Tracker").worksheet("Sheet1")
 all_values = ws.get_all_values()
 if not all_values or len(all_values) < 2:
     st.error("No data found in the sheet.")
@@ -34,37 +39,36 @@ df = pd.DataFrame(records)
 if not df.empty:
     df['SheetRow'] = df.index + 2
 
-# Standardize expected columns
+# === Standardize expected columns ===
 expected_cols = ["Date Placed", "Stake ($)", "EV", "Odds", "Profit/Loss", "Result", "Game Name", "Sport"]
 for col in expected_cols:
     if col not in df.columns:
         df[col] = ""
 df = df[expected_cols + ['SheetRow']]
 
-# Clean and normalize data
+# === Clean and normalize data ===
 df["Stake ($)"] = df["Stake ($)"].replace('[\$,]', '', regex=True).replace('', '0').astype(float)
 df["Profit/Loss"] = df["Profit/Loss"].replace('[\$,]', '', regex=True).replace('', '0').astype(float)
-# EV is now stored as decimal (e.g. 0.2 for 20%), so just cast
+# EV stored as decimal (e.g. 0.2 = 20%)
 try:
     df['EV'] = df['EV'].astype(float)
 except:
-    df['EV'] = df['EV'].replace('%','', regex=True).replace('', '0').astype(float)
-
+    df['EV'] = df['EV'].replace('%', '', regex=True).replace('', '0').astype(float)
 # Normalize missing values
 df['Result'] = df['Result'].fillna('').replace('', 'Pending')
 df['Sport'] = df['Sport'].fillna('').replace('', 'Unknown')
 
-# Profit and Expected Profit calculations
+# === Profit calculations ===
 def calc_real(r):
-    if r['Result']=='Win': return r['Profit/Loss'] - r['Stake ($)']
-    if r['Result']=='Loss': return -r['Stake ($)']
-    if r['Result']=='Cashed Out': return r['Profit/Loss'] - r['Stake ($)']
+    if r['Result'] == 'Win':
+        return r['Profit/Loss'] - r['Stake ($)']
+    if r['Result'] == 'Loss':
+        return -r['Stake ($)']
+    if r['Result'] == 'Cashed Out':
+        return r['Profit/Loss'] - r['Stake ($)']
     return 0
-
 def calc_expected(r):
-    # EV is decimal fraction, so expected profit = stake * EV
     return r['Stake ($)'] * r['EV']
-
 df['Real Profit'] = df.apply(calc_real, axis=1)
 df['Expected Profit'] = df.apply(calc_expected, axis=1)
 
@@ -73,7 +77,7 @@ st.sidebar.header("➕ Add New Bet")
 with st.sidebar.form("add_bet_form"):
     new_date   = st.date_input("Date Placed", value=date.today())
     new_stake  = st.number_input("Stake ($)", min_value=0.0, format="%.2f")
-    new_ev     = st.number_input("EV", min_value=0.0, format="%.3f")
+    new_ev     = st.number_input("EV (decimal)", min_value=0.0, format="%.3f")
     new_odds   = st.text_input("Odds")
     new_profit = st.number_input("Profit/Loss ($)", format="%.2f")
     new_result = st.selectbox("Result", ["Win","Loss","Cashed Out","Pending"], index=3)
@@ -87,7 +91,7 @@ with st.sidebar.form("add_bet_form"):
         st.sidebar.success("Bet added! Refresh to update.")
 
 st.sidebar.markdown("---")
-# === Filters ===
+# === Sidebar: Filters & Settings ===
 st.sidebar.header("🔍 Filters & Settings")
 dyn_results = df['Result'].unique().tolist()
 dyn_sports = [s for s in df['Sport'].unique().tolist() if s!='Unknown']
@@ -101,12 +105,12 @@ if not df_filtered.empty:
     df_filtered['Date Placed'] = pd.to_datetime(df_filtered['Date Placed'], dayfirst=True, errors='coerce')
     df_filtered = df_filtered.dropna(subset=['Date Placed'])
 
-# === Main Dashboard ===
+# === Main Dashboard Metrics ===
 st.title("📊 EV Betting Tracker Dashboard")
 profit = df_filtered['Real Profit'].sum()
 turnover = df_filtered['Stake ($)'].sum()
-yield_pct = profit/turnover*100 if turnover else 0
-roi_pct = profit/initial_capital*100 if initial_capital else 0
+yield_pct = profit / turnover * 100 if turnover else 0
+roi_pct = profit / initial_capital * 100 if initial_capital else 0
 bets_count = len(df_filtered)
 cols = st.columns(5)
 cols[0].metric("Profit", f"A${profit:,.2f}")
@@ -115,7 +119,7 @@ cols[2].metric("Turnover", f"A${turnover:,.2f}")
 cols[3].metric("Yield", f"{yield_pct:.2f}%")
 cols[4].metric("ROI", f"{roi_pct:.2f}%")
 
-# === Profit & Expected Chart with Range Slider and Hover ===
+# === Profit & Expected Chart with Range Slider ===
 st.subheader("📈 Profit & Expected Profit Over Time")
 chart_df = df_filtered.groupby('Date Placed')[['Real Profit','Expected Profit']].sum().cumsum().reset_index()
 fig = px.line(
