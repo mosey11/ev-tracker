@@ -11,7 +11,6 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 import plotly.express as px
-from matplotlib.dates import DateFormatter
 from datetime import date
 
 # === Google Sheets Authentication using Streamlit Secrets ===
@@ -31,44 +30,37 @@ if not all_values or len(all_values) < 2:
     st.error("No data found in the sheet.")
     st.stop()
 headers = all_values[0]
-records = []
-for row in all_values[1:]:
-    row_ext = row + [""] * (len(headers) - len(row))
-    records.append(dict(zip(headers, row_ext)))
+records = [dict(zip(headers, row + [""]*(len(headers)-len(row)))) for row in all_values[1:]]
 df = pd.DataFrame(records)
-if not df.empty:
-    df['SheetRow'] = df.index + 2
 
 # === Standardize expected columns ===
 expected_cols = ["Date Placed", "Stake ($)", "EV", "Odds", "Profit/Loss", "Result", "Game Name", "Sport"]
 for col in expected_cols:
-    if col not in df.columns:
-        df[col] = ""
-df = df[expected_cols + ['SheetRow']]
+    df.setdefault(col, "")
+
+df['SheetRow'] = df.index + 2
 
 # === Clean and normalize data ===
 df["Stake ($)"] = df["Stake ($)"].replace('[\$,]', '', regex=True).replace('', '0').astype(float)
 df["Profit/Loss"] = df["Profit/Loss"].replace('[\$,]', '', regex=True).replace('', '0').astype(float)
-# EV stored as decimal (e.g. 0.2 = 20%)
+# EV stored as decimal fraction
 try:
     df['EV'] = df['EV'].astype(float)
 except:
-    df['EV'] = df['EV'].replace('%', '', regex=True).replace('', '0').astype(float)
-# Normalize missing values
+    df['EV'] = df['EV'].replace('%','', regex=True).replace('', '0').astype(float)
+# Normalize missing
+
 df['Result'] = df['Result'].fillna('').replace('', 'Pending')
 df['Sport'] = df['Sport'].fillna('').replace('', 'Unknown')
 
-# === Profit calculations ===
+# === Profit and Expected Profit calculations ===
 def calc_real(r):
-    if r['Result'] == 'Win':
-        return r['Profit/Loss'] - r['Stake ($)']
-    if r['Result'] == 'Loss':
-        return -r['Stake ($)']
-    if r['Result'] == 'Cashed Out':
-        return r['Profit/Loss'] - r['Stake ($)']
+    if r['Result'] == 'Win': return r['Profit/Loss'] - r['Stake ($)']
+    if r['Result'] == 'Loss': return -r['Stake ($)']
+    if r['Result'] == 'Cashed Out': return r['Profit/Loss'] - r['Stake ($)']
     return 0
-def calc_expected(r):
-    return r['Stake ($)'] * r['EV']
+def calc_expected(r): return r['Stake ($)'] * r['EV']
+
 df['Real Profit'] = df.apply(calc_real, axis=1)
 df['Expected Profit'] = df.apply(calc_expected, axis=1)
 
