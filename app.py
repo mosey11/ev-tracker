@@ -36,7 +36,13 @@ for col in expected_cols:
 
 # === Clean & normalize data ===
 df["Stake ($)"] = df["Stake ($)"].replace('[\$,]', '', regex=True).fillna('0').astype(float)
-df["Profit/Loss"] = df["Profit/Loss"].replace('[\$,]', '', regex=True).fillna('0').astype(float)
+# Clean Profit/Loss: strip $ and commas, convert blanks to 0, coerce errors
+df["Profit/Loss"] = (pd.to_numeric(
+    df["Profit/Loss"].astype(str)
+       .replace('[\$,]', '', regex=True)
+       .replace('', '0'),
+    errors='coerce'
+).fillna(0.0))
 def parse_ev(val):
     try:
         return float(val)
